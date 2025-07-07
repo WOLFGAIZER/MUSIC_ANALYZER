@@ -1,0 +1,12 @@
+__pycache__/
+.env
+uploads/
+outputs/
+*.zip
+*.pyc
+*.pkl
+*.wav
+*.mp3
+venv/
+.idea/
+.DS_Store
