@@ -1,20 +1,25 @@
 # routes/karaoke.py
-from fastapi import APIRouter, Query
-from typing import List
-from services.ffmpeg_mixer import generate_karaoke_mix
+
+from fastapi import APIRouter, Form
+from pydantic import BaseModel
+import os
+from services.ffmpeg_mixer import mix_selected_stems
 
 router = APIRouter()
 
+class KaraokeRequest(BaseModel):
+    filename: str
+    selected_stems: list
+
 @router.post("/")
-def make_karaoke(
-    stems_path: str = Query(...),
-    mute: List[str] = Query(default=["vocals"])  # e.g. ["vocals", "drums"]
-):
-    try:
-        output_file = generate_karaoke_mix(stems_path, mute)
-        return {
-            "message": "Karaoke track created.",
-            "file": output_file
-        }
-    except Exception as e:
-        return {"error": str(e)}
+def generate_karaoke(request: KaraokeRequest):
+    base_name = request.filename.replace(".mp3", "").replace(".wav", "")
+    input_dir = f"outputs/{base_name}/separated_stems"
+    output_path = f"outputs/{base_name}_karaoke.wav"
+
+    success = mix_selected_stems(input_dir, request.selected_stems, output_path)
+
+    if success:
+        return {"message": "Karaoke created!", "karaoke_path": output_path}
+    else:
+        return {"error": "Failed to generate karaoke. Check stem files."}

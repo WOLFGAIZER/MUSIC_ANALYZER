@@ -1,43 +1,44 @@
 # services/ffmpeg_mixer.py
+
 import os
 import subprocess
-from uuid import uuid4
 
-def generate_karaoke_mix(stems_dir: str, mute_stems: list) -> str:
-    output_file = os.path.join("outputs", f"{uuid4().hex}_karaoke.wav")
+def mix_selected_stems(input_dir: str, selected_stems: list, output_path: str) -> bool:
+    """
+    Mix selected stem WAV files using FFmpeg.
 
-    # Collect all stem paths
-    stem_map = {
-        "vocals": "vocals.wav",
-        "drums": "drums.wav",
-        "bass": "bass.wav",
-        "other": "other.wav"
-    }
+    Args:
+        input_dir (str): Folder containing separated stems (e.g. vocals.wav, drums.wav, etc.)
+        selected_stems (list): List of stems to include
+        output_path (str): Path to save final mixed audio
 
-    inputs = []
-    filters = []
-    index = 0
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    input_files = []
+    filter_inputs = []
 
-    for stem, file in stem_map.items():
-        file_path = os.path.join(stems_dir, file)
-        if not os.path.exists(file_path): continue
+    for idx, stem in enumerate(selected_stems):
+        file_path = os.path.join(input_dir, f"{stem}.wav")
+        if not os.path.exists(file_path):
+            continue
+        input_files.extend(["-i", file_path])
+        filter_inputs.append(f"[{idx}:a]")
 
-        inputs.extend(["-i", file_path])
-        vol = "volume=0" if stem in mute_stems else "volume=1"
-        filters.append(f"[{index}:a]{vol}[a{index}]")
-        index += 1
+    if not input_files:
+        return False
 
-    # Combine filters and output
-    filter_complex = "; ".join(filters) + f"; {' '.join([f'[a{i}]' for i in range(index)])}amix=inputs={index}:duration=longest[out]"
-    command = [
-        "ffmpeg", *inputs,
+    # FFmpeg filter: mix all selected stems
+    filter_complex = f"{''.join(filter_inputs)}amix=inputs={len(filter_inputs)}:normalize=0[out]"
+
+    cmd = ["ffmpeg", "-y"] + input_files + [
         "-filter_complex", filter_complex,
         "-map", "[out]",
-        "-y", output_file
+        output_path
     ]
 
     try:
-        subprocess.run(command, check=True)
-        return output_file
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"FFmpeg mixing failed: {e}")
+        subprocess.run(cmd, check=True)
+        return True
+    except subprocess.CalledProcessError:
+        return False

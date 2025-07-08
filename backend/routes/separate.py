@@ -1,48 +1,42 @@
-# routes/separate.py
-
 from fastapi import APIRouter, UploadFile, File
-from services.hf_demucs import run_demucs_hf
-import shutil
+from fastapi.responses import FileResponse
 import os
-import uuid
+import shutil
 import subprocess
+import uuid
 
 router = APIRouter()
 
-os.makedirs("uploads", exist_ok=True)
-os.makedirs("outputs", exist_ok=True)
-
-@router.post("/")
-async def separate_stems(file: UploadFile = File(...)):
-    unique_id = str(uuid.uuid4())
-    original_filename = file.filename
-    input_path = f"uploads/{unique_id}_{original_filename}"
+@router.post("/separate/")
+async def separate_audio(file: UploadFile = File(...)):
+    # 1. Save uploaded file
+    file_id = str(uuid.uuid4())
+    os.makedirs("uploads", exist_ok=True)
+    input_path = f"uploads/{file_id}_{file.filename}"
 
     with open(input_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # Convert to WAV if needed
-    if not original_filename.endswith(".wav"):
-        wav_path = input_path.rsplit(".", 1)[0] + ".wav"
-        try:
-            subprocess.run(["ffmpeg", "-y", "-i", input_path, wav_path], check=True)
-            input_path = wav_path
-        except subprocess.CalledProcessError as e:
-            return {"error": f"FFmpeg conversion failed: {e}"}
+    # 2. Run Demucs
+    output_dir = "separated"
+    os.makedirs(output_dir, exist_ok=True)
 
-    # Call HuggingFace Demucs (returns ZIP but we'll handle later)
-    result = run_demucs_hf(input_path)
+    try:
+        subprocess.run([
+            "demucs",
+            "--two-stems=vocals",
+            "-o", output_dir,
+            input_path
+        ], check=True)
+    except subprocess.CalledProcessError:
+        return {"error": "Demucs failed to process audio."}
 
-    if result:
-        # Save to temporary file
-        output_file = f"outputs/{unique_id}_demucs_output.zip"
-        with open(output_file, "wb") as f:
-            f.write(result)
+    # 3. Locate vocals.wav
+    filename_no_ext = os.path.splitext(os.path.basename(input_path))[0]
+    demucs_folder = os.path.join(output_dir, "htdemucs", f"{filename_no_ext}")
+    vocal_path = os.path.join(demucs_folder, "vocals.wav")
 
-        return {
-            "message": "Stems separated (ZIP output ready)",
-            "zip_path": output_file,
-            "note": "Stem preview not implemented in this version"
-        }
+    if not os.path.exists(vocal_path):
+        return {"error": "Vocals file not found."}
 
-    return {"error": "Stem separation failed"}
+    return FileResponse(vocal_path, media_type="audio/wav", filename="vocals.wav")
